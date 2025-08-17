@@ -10,10 +10,6 @@
  * Usage: php annotate_images.php --in=./input --out=./output --font=./fonts/DejaVuSans.ttf
  */
 
-// Error reporting for debugging
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
 /**
  * Display usage information
  */
@@ -627,35 +623,50 @@ function processDirectory($inputDir, $outputDir, $fontPath = null, $maxWidth = n
     echo "Errors: $errors files\n";
 }
 
-// Main execution
-if (php_sapi_name() !== 'cli') {
-    echo "This script must be run from the command line.\n";
-    exit(1);
+/**
+ * Main execution function
+ */
+function main()
+{
+    // Main execution check
+    if (php_sapi_name() !== 'cli') {
+        echo "This script must be run from the command line.\n";
+        exit(1);
+    }
+
+    // Error reporting for debugging
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+
+    // Check extensions
+    checkExtensions();
+
+    // Parse arguments
+    $options = parseArguments($GLOBALS['argv']);
+
+    // Validate font file if provided
+    if ($options['font'] && !file_exists($options['font'])) {
+        echo "Warning: Font file not found: {$options['font']}\n";
+        echo "Will use GD built-in fonts instead.\n";
+        $options['font'] = null;
+    }
+
+    echo "Photo Metadata Annotator\n";
+    echo "Input directory: {$options['in']}\n";
+    echo "Output directory: {$options['out']}\n";
+    if ($options['font']) {
+        echo "Font file: {$options['font']}\n";
+    }
+    if ($options['max_width']) {
+        echo "Max width: {$options['max_width']}px\n";
+    }
+    echo "\n";
+
+    // Process images
+    processDirectory($options['in'], $options['out'], $options['font'], $options['max_width']);
 }
 
-// Check extensions
-checkExtensions();
-
-// Parse arguments
-$options = parseArguments($argv);
-
-// Validate font file if provided
-if ($options['font'] && !file_exists($options['font'])) {
-    echo "Warning: Font file not found: {$options['font']}\n";
-    echo "Will use GD built-in fonts instead.\n";
-    $options['font'] = null;
+// Execute main function only when run directly
+if (basename(__FILE__) === basename($_SERVER['SCRIPT_NAME'] ?? '')) {
+    main();
 }
-
-echo "Photo Metadata Annotator\n";
-echo "Input directory: {$options['in']}\n";
-echo "Output directory: {$options['out']}\n";
-if ($options['font']) {
-    echo "Font file: {$options['font']}\n";
-}
-if ($options['max_width']) {
-    echo "Max width: {$options['max_width']}px\n";
-}
-echo "\n";
-
-// Process images
-processDirectory($options['in'], $options['out'], $options['font'], $options['max_width']);
