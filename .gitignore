@@ -1,0 +1,5 @@
+/report/*
+/output/*
+/input/*
+.env
+.DS_Store
