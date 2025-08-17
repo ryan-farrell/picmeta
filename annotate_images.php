@@ -35,7 +35,7 @@ function parseArguments($argv)
     $options = [
         'in' => './input',
         'out' => './output',
-        'font' => null,
+        'font' => '/System/Library/Fonts/Geneva.ttf',
         'max_width' => null
     ];
 
@@ -416,7 +416,7 @@ function overlayMetadata($imageData, $exifData, $fontPath = null, $inputPath = n
     $width = $imageData['width'];
     $height = $imageData['height'];
 
-        // Prepare metadata text - ONLY the required fields
+    // Prepare metadata text - ONLY the required fields
     $lines = [];
 
     // 1. Taken: (UK time date dd/MM/yyyy HH:ii:ss) - only if original photo date exists
@@ -455,87 +455,85 @@ function overlayMetadata($imageData, $exifData, $fontPath = null, $inputPath = n
         $lines[] = 'Lat/Lng:';
     }
 
-    // Calculate overlay dimensions
-    $padding = 10;
-    $lineHeight = 20;
+    // Calculate text positioning for bottom right corner
+    $padding = 24;
+    $lineHeight = 36;
+    $fontSize = 20;
+
+    // Calculate maximum text width to determine overlay size
+    $maxTextWidth = 0;
+    foreach ($lines as $line) {
+        if ($fontPath && function_exists('imagettfbbox') && file_exists($fontPath)) {
+            $bbox = @imagettfbbox($fontSize, 0, $fontPath, $line);
+            if ($bbox !== false) {
+                $textWidth = $bbox[2] - $bbox[0];
+            } else {
+                $textWidth = strlen($line) * 8; // Fallback to GD font width
+            }
+        } else {
+            $scale = max(1, intval($fontSize / 12)); // Scale factor based on font size
+            $gdFont = min(5, $scale); // GD fonts are 1-5
+            $charWidth = 8 * $gdFont; // Approximate width per character for GD font
+            $textWidth = strlen($line) * $charWidth;
+        }
+        $maxTextWidth = max($maxTextWidth, $textWidth);
+    }
+
+    $overlayWidth = $maxTextWidth + $padding * 2;
     $overlayHeight = count($lines) * $lineHeight + $padding * 2;
-    $overlayWidth = $width;
+
+        // Position overlay in bottom right corner
+    $overlayX = $width - $overlayWidth - $padding;
+    $overlayY = $height - $overlayHeight - $padding;
+
+    // Ensure overlay doesn't go outside image bounds
+    if ($overlayX < 0) {
+        $overlayX = $padding;
+    }
+    if ($overlayY < 0) {
+        $overlayY = $padding;
+    }
+
+    // Force bottom right positioning
+    $overlayX = max($padding, $width - $overlayWidth - $padding);
+    $overlayY = max($padding, $height - $overlayHeight - $padding);
 
     // Create semi-transparent overlay
     $overlay = imagecreatetruecolor($overlayWidth, $overlayHeight);
-    $black = imagecolorallocate($overlay, 0, 0, 0);
-    $transparent = imagecolorallocatealpha($overlay, 0, 0, 0, 127);
-
-    // Fill with semi-transparent black
-    imagefill($overlay, 0, 0, $transparent);
-    imagecolortransparent($overlay, $transparent);
 
     // Add semi-transparent black background
-    $semiBlack = imagecolorallocatealpha($overlay, 0, 0, 0, 100);
-    imagefilledrectangle($overlay, 0, 0, $overlayWidth - 1, $overlayHeight - 1, $semiBlack);
+    $semiBlack = imagecolorallocatealpha($overlay, 0, 0, 0, 120);
+    imagefill($overlay, 0, 0, $semiBlack);
 
-    // Draw text
-    $white = imagecolorallocate($overlay, 255, 255, 255);
+    // Draw text in yellow
+    $yellow = imagecolorallocate($overlay, 255, 255, 0);
     $y = $padding;
 
     foreach ($lines as $line) {
         if ($fontPath && function_exists('imagettftext') && file_exists($fontPath)) {
-            // Use TTF font with wrapping
-            $fontSize = 12;
-            $maxWidth = $overlayWidth - $padding * 2;
-
-            // Simple word wrapping
-            $words = explode(' ', $line);
-            $currentLine = '';
-            $lineY = $y;
-
-            foreach ($words as $word) {
-                $testLine = $currentLine . ($currentLine ? ' ' : '') . $word;
-                $bbox = imagettfbbox($fontSize, 0, $fontPath, $testLine);
-                $textWidth = $bbox[2] - $bbox[0];
-
-                if ($textWidth > $maxWidth && $currentLine) {
-                    imagettftext($overlay, $fontSize, 0, $padding, $lineY, $white, $fontPath, $currentLine);
-                    $currentLine = $word;
-                    $lineY += $lineHeight;
-                } else {
-                    $currentLine = $testLine;
-                }
-            }
-
-            if ($currentLine) {
-                imagettftext($overlay, $fontSize, 0, $padding, $lineY, $white, $fontPath, $currentLine);
-                $y = $lineY + $lineHeight;
+            // Use TTF font
+            $result = @imagettftext($overlay, $fontSize, 0, $padding, $y + $fontSize, $yellow, $fontPath, $line);
+            if ($result === false) {
+                // Fallback to GD built-in font if TTF fails
+                imagestring($overlay, 3, $padding, $y, $line, $yellow);
             }
         } else {
-            // Use GD built-in font
-            imagestring($overlay, 3, $padding, $y, $line, $white);
-            $y += $lineHeight;
+            // Use GD built-in font - scale up for larger text
+            $scale = max(1, intval($fontSize / 12)); // Scale factor based on font size
+            $gdFont = min(5, $scale); // GD fonts are 1-5, use the largest available
+            imagestring($overlay, $gdFont, $padding, $y, $line, $yellow);
         }
+        $y += $lineHeight;
     }
 
-    // Create new image with overlay
-    $newImage = imagecreatetruecolor($width, $height + $overlayHeight);
-
-    // Preserve transparency for PNG and GIF
-    if (in_array($imageData['format'], ['png', 'gif'])) {
-        imagealphablending($newImage, false);
-        imagesavealpha($newImage, true);
-        $transparent = imagecolorallocatealpha($newImage, 255, 255, 255, 127);
-        imagefill($newImage, 0, 0, $transparent);
-    }
-
-    // Copy original image
-    imagecopy($newImage, $image, 0, 0, 0, 0, $width, $height);
-
-    // Copy overlay
-    imagecopy($newImage, $overlay, 0, $height, 0, 0, $overlayWidth, $overlayHeight);
+    // Copy overlay onto the original image
+    imagecopy($image, $overlay, $overlayX, $overlayY, 0, 0, $overlayWidth, $overlayHeight);
 
     return [
-        'resource' => $newImage,
+        'resource' => $image,
         'format' => $imageData['format'],
         'width' => $width,
-        'height' => $height + $overlayHeight
+        'height' => $height
     ];
 }
 
